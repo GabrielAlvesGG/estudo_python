@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from datetime import date
 from typing import Optional
 
-from app.services.pegar_os_arquivos import fetch_all_dicts, fetch_empresas_relatorio
+from app.services.pegar_os_arquivos import fetch_all_dicts, fetch_empresas_relatorio, processar_relatorio_validacao
 
 router = APIRouter(
     prefix="/empresas",
@@ -49,16 +49,31 @@ def relatorio_empresas(
     filial_id: Optional[int] = Query(None, description="Id da filial (Estabelecimento)")
 ):
     """
-    Retorna empresas e estabelecimentos filtrados por período e ids.
-    Os filtros são aplicados via WHERE no service.
+    - Se já existir um filtro igual com status EM_ANDAMENTO/CONCLUIDO, retorna o status.
+    - Caso contrário, gera o relatório e salva o filtro com status EM_ANDAMENTO.
     """
     if data_entrada > data_saida:
         raise HTTPException(status_code=400, detail="data_entrada não pode ser maior que data_saida")
 
-    rows = fetch_empresas_relatorio(
+    result = processar_relatorio_validacao(
         data_inicio=data_entrada,
         data_fim=data_saida,
         empresa_id=empresa_id,
         filial_id=filial_id
     )
-    return _agrupar_empresas(rows)
+
+    if "rows" not in result:
+        # Já havia um registro na tabela de filtros
+        return {
+            "status": result["status"],
+            "filtro_id": result["filtro_id"],
+            "message": result.get("message", "")
+        }
+
+    # Nova geração: agrega os dados e retorna junto com o status EM_ANDAMENTO
+    agregados = _agrupar_empresas(result["rows"])
+    return {
+        "status": "em_andamento",
+        "filtro_id": result["filtro_id"],
+        "resultado": agregados
+    }
